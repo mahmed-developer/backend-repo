@@ -1,0 +1,59 @@
+name: Backend CI/CD - Build & Deploy to Swarm
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAMESPACE: ${{ secrets.DOCKERHUB_USERNAME }}
+  SERVICES: auth-service,data-service
+
+jobs:
+  build-test-push-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+
+    - name: Install dependencies & DevSecOps tools
+      run: |
+        pip install flake8 bandit safety pip-audit pytest docker
+
+    - name: Lint & Security Scan
+      run: |
+        flake8 .
+        bandit -r .
+        safety check
+        pip-audit
+
+    - name: Run Unit Tests
+      run: |
+        pytest -v
+
+    - name: Build & Push Docker images
+      run: |
+        for SERVICE in $(echo $SERVICES | tr "," " "); do
+          echo "Building $SERVICE..."
+          docker build -t $REGISTRY/$IMAGE_NAMESPACE/$SERVICE:latest ./$SERVICE
+          echo "Pushing $SERVICE..."
+          echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
+          docker push $REGISTRY/$IMAGE_NAMESPACE/$SERVICE:latest
+        done
+
+    - name: Deploy to Swarm via SSH
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SWARM_MANAGER_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
+        script_stop: true
+        script: |
+          echo "Deploying stack..."
+          docker stack deploy -c /home/${{ secrets.SSH_USER }}/backend-docker-stack.yml backend-stack
+          echo "Deployment complete!"
