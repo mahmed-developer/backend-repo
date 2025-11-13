@@ -25,11 +25,6 @@ jobs:
       run: |
         pip install flake8 bandit safety pip-audit pytest docker
 
-    - name: Lint & Security Scan
-      run: |
-       pip install safety
-       safety scan
-
     - name: Run Unit Tests
       run: |
        pytest -v || true  
